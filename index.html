@@ -1,36 +1,41 @@
-<!DOCTYPE html>
-<html>
-<head>
-  <meta charset="utf-8">
-  <title>Mi escena</title>
-  <script src="https://aframe.io/releases/1.7.0/aframe.min.js"></script>
-  <script>
-    // Radio: al hacer clic reproduce / pausa el audio y enciende su luz indicadora.
-    AFRAME.registerComponent('radio-audio', {
-      schema: { src: { type: 'selector' } },
-      init: function () {
-        var audio = this.data.src;
-        var el = this.el;
-        var indicador = null;
+<body>
+  <a-scene stats>
+    <a-assets>
+      <a-asset-item id="silla" src="activos/silla.glb"></a-asset-item>
+      <a-asset-item id="radio" src="activos/radio.glb"></a-asset-item>
+      <!-- Audio de prueba: reemplazar por el audio de un relato de la Cooperativa -->
+      <audio id="audio-relato" src="activos/audio-prueba.wav" preload="auto" loop></audio>
+    </a-assets>
 
-        function luz(encendida) {
-          if (!indicador) return;
-          indicador.material.emissive.setHex(encendida ? 0xff3b1f : 0x000000);
-          indicador.material.emissiveIntensity = encendida ? 2 : 0;
-        }
+    <a-entity gltf-model="#silla" position="0 0 -2.5" rotation="0 35 0"></a-entity>
 
-        el.addEventListener('model-loaded', function () {
-          el.object3D.traverse(function (o) {
-            if (o.name === 'indicador' && o.material) {
-              o.material = o.material.clone();
-              indicador = o;
-            }
-          });
-          luz(!audio.paused);
-        });
+    <!-- Cámara con cursor (la mira) como hijo -->
+    <a-entity camera="fov: 60" look-controls wasd-controls position="0 1.6 0">
+      <a-cursor color="#26A9CB" raycaster="objects: .clickable"></a-cursor>
+    </a-entity>
 
-        el.addEventListener('click', function () {
-          if (audio.paused) {
+    <a-box position="-1.5 0.5 -3" color="#4CC3D9"></a-box>
+    <a-box id="caja-giratoria" class="clickable" position="-2.8 0.5 -4" color="#212220"
+       animation__click="property: rotation; from: 0 0 0; to: 0 360 0; dur: 1000; startEvents: click"
+       animation__enter="property: scale; to: 1.2 1.2 1.2; dur: 200; startEvents: mouseenter"
+       animation__leave="property: scale; to: 1 1 1; dur: 200; startEvents: mouseleave">
+    </a-box>
+
+    <!-- Radio sobre un pedestal: clic para escuchar -->
+    <a-box position="1.5 0.3 -2.5" rotation="0 -30 0" width="0.7" height="0.6" depth="0.5" color="#9C7A54"></a-box>
+    <a-entity class="clickable" gltf-model="#radio" radio-audio="src: #audio-relato"
+              position="1.5 0.6 -2.5" rotation="0 -30 0"></a-entity>
+    <a-text value="Radio: clic para escuchar" align="center" width="2" color="#333"
+            position="1.5 1.45 -2.5" rotation="0 -30 0"></a-text>
+
+    <a-plane rotation="-90 0 0" width="10" height="10" color="#7BC8A4"></a-plane>
+    <a-sky color="#ECECEC"></a-sky>
+
+    <a-entity light="type: ambient; intensity: 0.6"></a-entity>
+    <a-entity light="type: directional; intensity: 0.8" position="-1 2 1"></a-entity>
+  </a-scene>
+</body>
+</html>
             audio.play().catch(function (e) { console.warn('No se pudo reproducir el audio:', e); });
           } else {
             audio.pause();
