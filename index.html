@@ -3,32 +3,46 @@
 <head>
   <meta charset="utf-8">
   <title>Mi escena</title>
-  <script src="https://aframe.io/releases/1.7.0/aframe.min.js"></script>
-  <script>
-    // Radio: al hacer clic reproduce / pausa el audio y enciende su luz indicadora.
-    AFRAME.registerComponent('radio-audio', {
-      schema: { src: { type: 'selector' } },
-      init: function () {
-        var audio = this.data.src;
-        var el = this.el;
-        var indicador = null;
 
+  <!-- Libreria A-Frame: convierte las etiquetas <a-...> en objetos 3D -->
+  <script src="https://aframe.io/releases/1.7.0/aframe.min.js"></script>
+
+  <script>
+    // ============================================================
+    // COMPONENTES PROPIOS
+    // Un componente es un comportamiento que se le pega a un objeto
+    // escribiendo su nombre como atributo (ej: radio-audio="...").
+    // ============================================================
+
+    // ---------- 1) radio-audio ----------
+    // Al hacer clic sobre la radio reproduce / pausa el audio y enciende
+    // o apaga su luz roja (la pieza del modelo llamada "indicador").
+    AFRAME.registerComponent('radio-audio', {
+      schema: { src: { type: 'selector' } },   // recibe el audio: radio-audio="src: #audio-relato"
+      init: function () {
+        var audio = this.data.src;             // el <audio> que se indico en src
+        var el = this.el;                      // el objeto 3D que lleva este componente (la radio)
+        var indicador = null;                  // aqui se guardara la luz roja
+
+        // Enciende o apaga la luz roja cambiando su color de emision.
         function luz(encendida) {
           if (!indicador) return;
           indicador.material.emissive.setHex(encendida ? 0xff3b1f : 0x000000);
           indicador.material.emissiveIntensity = encendida ? 2 : 0;
         }
 
+        // Cuando el modelo termina de cargar, buscamos dentro de el la pieza "indicador".
         el.addEventListener('model-loaded', function () {
           el.object3D.traverse(function (o) {
             if (o.name === 'indicador' && o.material) {
-              o.material = o.material.clone();
+              o.material = o.material.clone();  // copia propia del material
               indicador = o;
             }
           });
           luz(!audio.paused);
         });
 
+        // Clic sobre la radio: si el audio esta en pausa lo reproduce, si no lo pausa.
         el.addEventListener('click', function () {
           if (audio.paused) {
             audio.play().catch(function (e) { console.warn('No se pudo reproducir el audio:', e); });
@@ -37,17 +51,81 @@
           }
         });
 
+        // La luz sigue al audio (asi tambien responde si el audio termina o se pausa por otro lado).
         audio.addEventListener('play', function () { luz(true); });
         audio.addEventListener('pause', function () { luz(false); });
 
-        el.addEventListener('mouseenter', function () { document.body.style.cursor = 'pointer'; });
-        el.addEventListener('mouseleave', function () { document.body.style.cursor = ''; });
+        // Puntero en forma de manito mientras el mouse esta encima de la radio.
+        // Se cambia el estilo del canvas (lo que esta bajo el mouse), no el del body.
+        el.addEventListener('mouseenter', function () { el.sceneEl.canvas.style.cursor = 'pointer'; });
+        el.addEventListener('mouseleave', function () { el.sceneEl.canvas.style.cursor = ''; });
+      }
+    });
+
+    // ---------- 2) arrastrable ----------
+    // Mantén presionado el clic sobre el objeto y muevelo por el suelo.
+    AFRAME.registerComponent('arrastrable', {
+      init: function () {
+        var el = this.el;                      // el objeto que se arrastra (la silla)
+        var escena = el.sceneEl;
+        var camaraEl = document.querySelector('[camera]');
+        var raycaster = new THREE.Raycaster(); // "rayo" que sale de la camara hacia el mouse
+        var mouse = new THREE.Vector2();       // posicion del mouse en coordenadas -1 a 1
+        var suelo = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0); // plano horizontal imaginario
+        var punto = new THREE.Vector3();       // punto del suelo bajo el mouse
+        var desfase = new THREE.Vector3();     // diferencia entre ese punto y el centro del objeto
+        var ultimo = { x: 0, y: 0 };           // ultima posicion conocida del mouse
+        var arrastrando = false;
+
+        // Convierte la posicion del mouse en un punto sobre el suelo.
+        function puntoEnSuelo(x, y, resultado) {
+          var r = escena.canvas.getBoundingClientRect();
+          mouse.x = ((x - r.left) / r.width) * 2 - 1;
+          mouse.y = -((y - r.top) / r.height) * 2 + 1;
+          raycaster.setFromCamera(mouse, escena.camera);
+          return raycaster.ray.intersectPlane(suelo, resultado); // null si el rayo no toca el suelo
+        }
+
+        // Al mover el mouse: guardamos donde esta y, si estamos arrastrando, movemos el objeto.
+        window.addEventListener('mousemove', function (e) {
+          ultimo.x = e.clientX;
+          ultimo.y = e.clientY;
+          if (!arrastrando) return;
+          if (!puntoEnSuelo(e.clientX, e.clientY, punto)) return;
+          // Nueva posicion = punto del suelo + desfase, sin salirse del plano de 10 x 10
+          var pos = el.object3D.position;
+          pos.x = Math.max(-4.5, Math.min(4.5, punto.x + desfase.x));
+          pos.z = Math.max(-4.5, Math.min(4.5, punto.z + desfase.z));
+        });
+
+        // Al presionar sobre el objeto: calculamos el desfase y apagamos el giro de camara.
+        el.addEventListener('mousedown', function () {
+          suelo.constant = -el.object3D.position.y;      // el plano pasa por la altura del objeto
+          if (!puntoEnSuelo(ultimo.x, ultimo.y, punto)) return;
+          desfase.copy(el.object3D.position).sub(punto); // para que no "salte" al agarrarlo
+          arrastrando = true;
+          camaraEl.setAttribute('look-controls', 'enabled', false); // mientras arrastro, la camara no gira
+        });
+
+        // Al soltar el clic: terminamos de arrastrar y reactivamos la camara.
+        window.addEventListener('mouseup', function () {
+          if (!arrastrando) return;
+          arrastrando = false;
+          camaraEl.setAttribute('look-controls', 'enabled', true);
+        });
       }
     });
   </script>
 </head>
+
 <body>
+  <!-- ESCENA
+       stats                       -> panel de rendimiento (fps, triangulos)
+       cursor="rayOrigin: mouse"   -> el mouse es el puntero que activa los objetos
+       raycaster="objects: .clickable" -> solo reaccionan los objetos con class="clickable" -->
   <a-scene stats cursor="rayOrigin: mouse" raycaster="objects: .clickable">
+
+    <!-- ARCHIVOS QUE SE CARGAN (modelos 3D y audio) -->
     <a-assets>
       <a-asset-item id="silla" src="activos/silla.glb"></a-asset-item>
       <a-asset-item id="radio" src="activos/radio.glb"></a-asset-item>
@@ -55,24 +133,54 @@
       <audio id="audio-relato" src="activos/audio-prueba.wav" preload="auto" loop></audio>
     </a-assets>
 
-    <a-entity gltf-model="#silla" position="0 0 -2.5" rotation="0 35 0"></a-entity>
+    <!-- CAMARA: es el "ojo" del visitante.
+         look-controls = arrastrar el mouse para mirar; wasd-controls = caminar con el teclado.
+         position="0 1.6 0": x=0, altura de 1.6 m (ojos), z=0 -->
     <a-entity camera="fov: 60" look-controls wasd-controls position="0 1.6 0"></a-entity>
-    <a-box position="-1.5 0.5 -3" color="#4CC3D9"></a-box>
 
-    <!-- Radio sobre un pedestal: clic para escuchar -->
+    <!-- SILLA: se puede tomar con el mouse y arrastrar por el suelo (componente "arrastrable").
+         class="clickable" hace que el mouse la detecte. -->
+    <a-entity id="silla-3d" class="clickable" gltf-model="#silla" arrastrable
+              position="0 0 -2.5" rotation="0 35 0"></a-entity>
+
+    <!-- OPCION B para la silla (en vez de la de arriba): que gire al hacer clic y crezca al pasar el mouse.
+         Para probarla: borra la silla de arriba y quita los signos de comentario de este bloque.
+    <a-entity id="silla-3d" class="clickable" gltf-model="#silla" position="0 0 -2.5" rotation="0 35 0"
+              animation__click="property: rotation; from: 0 35 0; to: 0 395 0; dur: 1000; startEvents: click"
+              animation__enter="property: scale; to: 1.2 1.2 1.2; dur: 200; startEvents: mouseenter"
+              animation__leave="property: scale; to: 1 1 1; dur: 200; startEvents: mouseleave"></a-entity>
+    -->
+
+    <!-- CAJA AZUL (abajo): mide 1 de alto, por eso su centro esta a y=0.5 y toca el suelo -->
+    <a-box id="caja-azul" position="-1.5 0.5 -3" color="#4CC3D9"></a-box>
+
+    <!-- CAJA NEGRA (arriba): mismo x y z que la azul.
+         y = 1 (alto de la azul) + 0.5 (mitad de la negra) = 1.5
+         animation__click : gira 360 grados en 1 segundo al hacer clic
+         animation__enter : crece a 1.2 cuando el mouse pasa por encima
+         animation__leave : vuelve a tamaño 1 cuando el mouse sale -->
+    <a-box id="caja-negra" class="clickable" position="-1.5 1.5 -3" color="#212220"
+           animation__click="property: rotation; from: 0 0 0; to: 0 360 0; dur: 1000; startEvents: click"
+           animation__enter="property: scale; to: 1.2 1.2 1.2; dur: 200; startEvents: mouseenter"
+           animation__leave="property: scale; to: 1 1 1; dur: 200; startEvents: mouseleave">
+    </a-box>
+
+    <!-- RADIO sobre un pedestal: clic para escuchar.
+         El pedestal es una caja; la radio se apoya en su cara superior (y = 0.6). -->
     <a-box position="1.5 0.3 -2.5" rotation="0 -30 0" width="0.7" height="0.6" depth="0.5" color="#9C7A54"></a-box>
     <a-entity class="clickable" gltf-model="#radio" radio-audio="src: #audio-relato"
               position="1.5 0.6 -2.5" rotation="0 -30 0"></a-entity>
     <a-text value="Radio: clic para escuchar" align="center" width="2" color="#333"
             position="1.5 1.45 -2.5" rotation="0 -30 0"></a-text>
 
-    <!-- Plano base. Para usar una captura de mapa (por ejemplo de Google Maps):
+    <!-- PLANO BASE (el suelo). Para usar una captura de mapa (por ejemplo de Google Maps):
          1) guardar la imagen en activos/mapa.jpg
          2) agregar en a-assets:  <img id="mapa" src="activos/mapa.jpg">
          3) en el plano, cambiar color="#7BC8A4" por src="#mapa" (y ajustar width/height a la proporcion de la imagen) -->
     <a-plane rotation="-90 0 0" width="10" height="10" color="#7BC8A4"></a-plane>
-    <a-sky color="#ECECEC"></a-sky>
 
+    <!-- CIELO y LUCES -->
+    <a-sky color="#ECECEC"></a-sky>
     <a-entity light="type: ambient; intensity: 0.6"></a-entity>
     <a-entity light="type: directional; intensity: 0.8" position="-1 2 1"></a-entity>
   </a-scene>
